@@ -1,0 +1,598 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+<title>정육면체 전개도 조합하기</title>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;width:100%;height:100%;font-family:Arial,'Noto Sans KR',sans-serif;background:#f7fbff;color:#111827;overflow:hidden;touch-action:none;overscroll-behavior:none}
+header{height:58px;background:#2563eb;color:white;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:900}
+.wrap{display:flex;height:calc(100vh - 58px)}
+aside{width:300px;background:white;border-right:2px solid #dbeafe;padding:14px;z-index:5;overflow:hidden}
+h2{font-size:18px;margin:6px 0 10px}
+p{line-height:1.45;font-weight:800;font-size:14px;margin:8px 0}
+.btn{width:100%;height:58px;margin:8px 0;border:0;border-radius:14px;background:#2563eb;color:white;font-size:20px;font-weight:900;cursor:pointer;touch-action:manipulation}
+.btn:active{transform:scale(.98);filter:brightness(.95)}
+.btn:disabled{opacity:.55;cursor:not-allowed}
+.btn.gray{background:#64748b}
+.btn.green{background:#16a34a}
+.pieceBox{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:10px}
+.piece{
+  width:126px;height:126px;border:4px solid #111827;border-radius:9px;
+  display:flex;align-items:center;justify-content:center;font-size:40px;font-weight:900;
+  cursor:grab;user-select:none;-webkit-user-select:none;touch-action:none;
+}
+.piece:active{transform:scale(1.05)}
+main{flex:1;position:relative;overflow:hidden;background-image:linear-gradient(#e5f0ff 1px,transparent 1px),linear-gradient(90deg,#e5f0ff 1px,transparent 1px);background-size:56px 56px;touch-action:none}
+#board{position:absolute;inset:0;touch-action:none}
+#foldCanvas{position:absolute;inset:0;width:100%;height:100%;display:none;background:#f7fbff;z-index:20;touch-action:none}
+.cell{position:absolute;width:96px;height:96px;border:3px dashed #93c5fd;border-radius:8px;background:rgba(255,255,255,.45);pointer-events:none}
+.cell.center{border:5px solid #2563eb;background:#dbeafe}
+.cell.hover{background:#bfdbfe;border-color:#1d4ed8}
+.square{
+  position:absolute;width:96px;height:96px;border:4px solid #111827;border-radius:9px;
+  display:flex;align-items:center;justify-content:center;font-size:34px;font-weight:900;
+  cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none;
+  box-shadow:0 6px 14px rgba(0,0,0,.12);transition:transform .12s;
+}
+.square.dragging{transform:scale(1.08);z-index:30}
+.message{position:absolute;left:50%;top:20px;transform:translateX(-50%);background:white;border:4px solid #2563eb;color:#1d4ed8;border-radius:18px;padding:14px 26px;font-size:26px;font-weight:900;box-shadow:0 10px 24px rgba(0,0,0,.14);display:none;z-index:60;text-align:center;max-width:92%}
+.guide{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);background:white;border:2px solid #dbeafe;border-radius:999px;padding:11px 18px;font-weight:900;z-index:3;text-align:center}
+.zoomPanel{position:absolute;right:18px;top:18px;display:none;gap:8px;z-index:70}
+.zoomPanel button{border:0;border-radius:12px;background:#2563eb;color:white;font-size:17px;font-weight:900;padding:12px 14px;box-shadow:0 6px 14px rgba(0,0,0,.15);touch-action:manipulation}
+.zoomPanel button:active{transform:scale(.96)}
+
+
+@media (max-width:850px){
+  header{height:50px;font-size:20px}
+  .wrap{height:calc(100vh - 50px)}
+  aside{width:220px;padding:10px}
+  p{font-size:12px;line-height:1.35}
+  h2{font-size:15px}
+  .btn{height:52px;font-size:18px}
+  .pieceBox{gap:8px}
+  .piece{width:94px;height:94px;font-size:30px}
+  .guide{font-size:13px;bottom:8px}
+  .zoomPanel{right:10px;top:10px;flex-direction:column}
+  .zoomPanel button{font-size:14px;padding:10px}
+}
+</style>
+</head>
+<body>
+<header>정육면체 전개도 직접 조합하기</header>
+<div class="wrap">
+<aside>
+  <h2>활동 방법</h2>
+  <p>정사각형 6개를 손가락으로 끌어다가 가운데 한 면을 기준으로 붙여 보세요.</p>
+  <p>완성되면 <b>검사하기</b>를 눌러 접히는 모습을 확인해요.</p>
+  <button class="btn green" id="checkBtn" type="button">검사하기</button>
+  <button class="btn gray" id="resetBtn" type="button">다시 하기</button>
+  <h2>정사각형 6개</h2>
+  <div class="pieceBox" id="pieceBox"></div>
+</aside>
+<main id="main">
+  <div id="board"></div>
+  <canvas id="foldCanvas"></canvas>
+  <div class="message" id="msg"></div>
+  <div class="zoomPanel" id="zoomPanel">
+    <button id="zoomInBtn" type="button">＋ 확대</button>
+    <button id="zoomOutBtn" type="button">－ 축소</button>
+    <button id="zoomResetBtn" type="button">원래 크기</button>
+  </div>
+  <div class="guide">빈 칸에 정사각형을 터치해서 놓으세요.</div>
+</main>
+</div>
+
+<script>
+document.addEventListener('gesturestart', e => e.preventDefault(), {passive:false});
+document.addEventListener('touchmove', e => e.preventDefault(), {passive:false});
+
+const main=document.getElementById('main');
+const board=document.getElementById('board');
+const pieceBox=document.getElementById('pieceBox');
+const msg=document.getElementById('msg');
+const foldCanvas=document.getElementById('foldCanvas');
+const ctx=foldCanvas.getContext('2d');
+const checkBtn=document.getElementById('checkBtn');
+const resetBtn=document.getElementById('resetBtn');
+
+const cellSize=96;
+const faceSize=132;
+let origin={x:0,y:0};
+let squares=[];
+let W=0,H=0, animating=false;
+let rotX=-0.62, rotY=0.72, zoom=1;
+let hoverCell=null;
+let canRotateCube=false;
+let currentFinalFaces=[];
+let activeDrag=null;
+let canvasTouchMode=false;
+let lastTouches=[];
+const colors=['#ff8fab','#ffd166','#8fe09b','#7fd3f7','#bd9af3','#ffc16e'];
+
+function prevent(e){ if(e.cancelable) e.preventDefault(); }
+function resizeCanvas(){
+  const r=main.getBoundingClientRect();
+  W=foldCanvas.width=Math.max(1,Math.floor(r.width*devicePixelRatio));
+  H=foldCanvas.height=Math.max(1,Math.floor(r.height*devicePixelRatio));
+}
+function boardCenter(){
+  const r=board.getBoundingClientRect();
+  origin.x=Math.round((r.width/2-cellSize/2)/cellSize)*cellSize;
+  origin.y=Math.round((r.height/2-cellSize/2)/cellSize)*cellSize;
+  resizeCanvas();
+}
+function gridToPx(gx,gy){return {x:origin.x+gx*cellSize, y:origin.y+gy*cellSize}}
+function pxToGrid(x,y){return {gx:Math.round((x-origin.x)/cellSize), gy:Math.round((y-origin.y)/cellSize)}}
+
+function drawGuideCells(){
+  board.querySelectorAll('.cell').forEach(e=>e.remove());
+  for(let gx=-3;gx<=3;gx++){
+    for(let gy=-3;gy<=3;gy++){
+      const p=gridToPx(gx,gy);
+      const c=document.createElement('div');
+      c.className='cell'+(gx===0&&gy===0?' center':'');
+      c.dataset.gx=gx; c.dataset.gy=gy;
+      c.style.left=p.x+'px'; c.style.top=p.y+'px';
+      board.appendChild(c);
+    }
+  }
+}
+function setHover(gx,gy){
+  if(hoverCell) hoverCell.classList.remove('hover');
+  hoverCell=board.querySelector(`.cell[data-gx="${gx}"][data-gy="${gy}"]`);
+  if(hoverCell) hoverCell.classList.add('hover');
+}
+function clearHover(){
+  if(hoverCell) hoverCell.classList.remove('hover');
+  hoverCell=null;
+}
+function makePieces(){
+  pieceBox.innerHTML='';
+  squares.forEach(s=>s.el.remove());
+  squares=[];
+  foldCanvas.style.display='none';
+  board.style.display='block';
+  msg.style.display='none';
+  animating=false;
+  canRotateCube=false;
+  currentFinalFaces=[];
+  if(zoomPanel) zoomPanel.style.display='none';
+  checkBtn.disabled=false;
+  resetBtn.disabled=false;
+  zoom=1; rotX=-0.62; rotY=0.72;
+  for(let i=0;i<6;i++){
+    const p=document.createElement('div');
+    p.className='piece';
+    p.style.background=colors[i];
+    p.textContent=i+1;
+    pieceBox.appendChild(p);
+
+    p.addEventListener('pointerdown',e=>{
+      prevent(e);
+      if(animating) return;
+      const sq=createSquare(i, e.clientX-cellSize/2, e.clientY-cellSize/2);
+      startPointerDrag(e,sq);
+    }, {passive:false});
+
+    p.addEventListener('touchstart',e=>{
+      prevent(e);
+      if(animating || activeDrag) return;
+      const t=e.changedTouches[0];
+      const sq=createSquare(i, t.clientX-cellSize/2, t.clientY-cellSize/2);
+      startTouchDrag(e,sq,t.identifier);
+    }, {passive:false});
+  }
+}
+function createSquare(i,left,top){
+  const sq=document.createElement('div');
+  sq.className='square';
+  sq.style.background=colors[i];
+  sq.textContent=i+1;
+  board.appendChild(sq);
+  const b=board.getBoundingClientRect();
+  const obj={id:i,el:sq,gx:null,gy:null,x:left-b.left,y:top-b.top};
+  squares.push(obj);
+  setPos(obj,obj.x,obj.y);
+
+  sq.addEventListener('pointerdown',e=>{prevent(e); if(!animating)startPointerDrag(e,obj)}, {passive:false});
+  sq.addEventListener('touchstart',e=>{
+    prevent(e);
+    if(animating || activeDrag) return;
+    startTouchDrag(e,obj,e.changedTouches[0].identifier);
+  }, {passive:false});
+
+  return obj;
+}
+function setPos(obj,x,y){
+  obj.x=x; obj.y=y;
+  obj.el.style.left=x+'px'; obj.el.style.top=y+'px';
+}
+function dragMoveTo(obj,clientX,clientY,offX,offY){
+  const b=board.getBoundingClientRect();
+  const x=clientX-b.left-offX, y=clientY-b.top-offY;
+  setPos(obj,x,y);
+  const g=pxToGrid(x,y);
+  setHover(g.gx,g.gy);
+}
+function finishDrag(obj){
+  obj.el.classList.remove('dragging');
+  clearHover();
+  activeDrag=null;
+  snap(obj);
+}
+function startPointerDrag(e,obj){
+  if(activeDrag) return;
+  obj.el.classList.add('dragging');
+  try{obj.el.setPointerCapture(e.pointerId)}catch(err){}
+  const b=board.getBoundingClientRect();
+  const offX=e.clientX-b.left-obj.x, offY=e.clientY-b.top-obj.y;
+  activeDrag={obj,offX,offY};
+
+  function move(ev){prevent(ev); dragMoveTo(obj,ev.clientX,ev.clientY,offX,offY);}
+  function up(ev){
+    prevent(ev);
+    try{obj.el.releasePointerCapture(e.pointerId)}catch(err){}
+    obj.el.removeEventListener('pointermove',move);
+    obj.el.removeEventListener('pointerup',up);
+    obj.el.removeEventListener('pointercancel',up);
+    finishDrag(obj);
+  }
+  obj.el.addEventListener('pointermove',move,{passive:false});
+  obj.el.addEventListener('pointerup',up,{passive:false});
+  obj.el.addEventListener('pointercancel',up,{passive:false});
+}
+function startTouchDrag(e,obj,touchId){
+  obj.el.classList.add('dragging');
+  const t=e.changedTouches[0];
+  const b=board.getBoundingClientRect();
+  const offX=t.clientX-b.left-obj.x, offY=t.clientY-b.top-obj.y;
+  activeDrag={obj,offX,offY,touchId};
+
+  function findTouch(ev){
+    for(const tt of ev.changedTouches){ if(tt.identifier===touchId) return tt; }
+    for(const tt of ev.touches){ if(tt.identifier===touchId) return tt; }
+    return null;
+  }
+  function move(ev){
+    prevent(ev);
+    const tt=findTouch(ev); if(!tt) return;
+    dragMoveTo(obj,tt.clientX,tt.clientY,offX,offY);
+  }
+  function end(ev){
+    prevent(ev);
+    const tt=findTouch(ev);
+    if(tt || ev.touches.length===0){
+      document.removeEventListener('touchmove',move);
+      document.removeEventListener('touchend',end);
+      document.removeEventListener('touchcancel',end);
+      finishDrag(obj);
+    }
+  }
+  document.addEventListener('touchmove',move,{passive:false});
+  document.addEventListener('touchend',end,{passive:false});
+  document.addEventListener('touchcancel',end,{passive:false});
+}
+function snap(obj){
+  const g=pxToGrid(obj.x,obj.y);
+  if(g.gx<-3||g.gx>3||g.gy<-3||g.gy>3){ obj.el.remove(); squares=squares.filter(s=>s!==obj); return; }
+  const occupied=squares.find(s=>s!==obj && s.gx===g.gx && s.gy===g.gy);
+  if(occupied){ show('이미 놓인 칸이에요!',false); return; }
+  obj.gx=g.gx; obj.gy=g.gy;
+  const p=gridToPx(obj.gx,obj.gy);
+  obj.el.style.transition='left .14s, top .14s, transform .12s';
+  setPos(obj,p.x,p.y);
+  setTimeout(()=>obj.el.style.transition='transform .12s',160);
+}
+function show(text,success){
+  msg.textContent=text;
+  msg.style.display='block';
+  msg.style.borderColor=success?'#16a34a':'#ef4444';
+  msg.style.color=success?'#16a34a':'#ef4444';
+}
+
+function analyzeNet(){
+  const placed=squares.filter(s=>s.gx!==null);
+  const cells=placed.map(s=>`${s.gx},${s.gy}`);
+  const set=new Set(cells);
+  const basicOK=placed.length===6 && set.size===6 && set.has('0,0');
+
+  let normals=new Map(), upv=new Map(), rightv=new Map();
+  if(set.has('0,0')){
+    const start='0,0';
+    normals.set(start,[0,0,1]); upv.set(start,[0,-1,0]); rightv.set(start,[1,0,0]);
+    let queue=[start];
+    function neg(v){return v.map(a=>-a)}
+    while(queue.length){
+      const key=queue.shift();
+      const [x,y]=key.split(',').map(Number);
+      const n=normals.get(key), u=upv.get(key), r=rightv.get(key);
+      for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){
+        const nk=`${x+dx},${y+dy}`;
+        if(!set.has(nk)||normals.has(nk)) continue;
+        let nn,nu,nr;
+        if(dx===1){ nn=r; nu=u; nr=neg(n); }
+        if(dx===-1){ nn=neg(r); nu=u; nr=n; }
+        if(dy===1){ nn=neg(u); nu=n; nr=r; }
+        if(dy===-1){ nn=u; nu=neg(n); nr=r; }
+        normals.set(nk,nn); upv.set(nk,nu); rightv.set(nk,nr);
+        queue.push(nk);
+      }
+    }
+  }
+
+  let connected=false;
+  if(placed.length>0){
+    const arr=[...set].map(v=>v.split(',').map(Number));
+    const q=[arr[0]], seen=new Set([arr[0].join(',')]);
+    while(q.length){
+      const [x,y]=q.shift();
+      for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){
+        const key=`${x+dx},${y+dy}`;
+        if(set.has(key)&&!seen.has(key)){seen.add(key);q.push([x+dx,y+dy]);}
+      }
+    }
+    connected=seen.size===set.size;
+  }
+
+  const normalSet=new Set([...normals.values()].map(v=>v.join(',')));
+  const ok=basicOK && connected && normals.size===6 && normalSet.size===6;
+  return {ok,set,placed,normals,upv,rightv};
+}
+
+function ease(t){return t<.5?2*t*t:1-Math.pow(-2*t+2,2)/2}
+function rot(p){
+  let [x,y,z]=p;
+  let cy=Math.cos(rotY), sy=Math.sin(rotY), cx=Math.cos(rotX), sx=Math.sin(rotX);
+  let x1=x*cy+z*sy, z1=-x*sy+z*cy;
+  let y1=y*cx-z1*sx, z2=y*sx+z1*cx;
+  return [x1,y1,z2];
+}
+function proj(p){
+  p=rot(p);
+  let f=780/(780-p[2]);
+  return [W/2+p[0]*f*1.38*zoom,H/2+p[1]*f*1.38*zoom,p[2]];
+}
+function mix(a,b,t){return [a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t,a[2]+(b[2]-a[2])*t]}
+function faceTarget(normal, up, right){
+  const s=faceSize, c=normal.map(v=>v*s/2);
+  return [
+    c.map((v,i)=>v-right[i]*s/2-up[i]*s/2),
+    c.map((v,i)=>v+right[i]*s/2-up[i]*s/2),
+    c.map((v,i)=>v+right[i]*s/2+up[i]*s/2),
+    c.map((v,i)=>v-right[i]*s/2+up[i]*s/2)
+  ];
+}
+function fallbackOrientation(key){
+  const [x,y]=key.split(',').map(Number);
+  if(x===0&&y===0) return [[0,0,1],[0,-1,0],[1,0,0]];
+  if(Math.abs(x)>=Math.abs(y)) return [x>0?[1,0,0]:[-1,0,0],[0,-1,0],x>0?[0,0,-1]:[0,0,1]];
+  return [[0,y>0?1:-1,0],y>0?[0,0,-1]:[0,0,1],[1,0,0]];
+}
+function drawFace(pts,color,label){
+  const ps=pts.map(proj);
+  ctx.beginPath(); ctx.moveTo(ps[0][0],ps[0][1]);
+  for(let i=1;i<4;i++)ctx.lineTo(ps[i][0],ps[i][1]);
+  ctx.closePath();
+  ctx.fillStyle=color; ctx.fill();
+  ctx.lineWidth=4*devicePixelRatio; ctx.strokeStyle='#111827'; ctx.stroke();
+  const cx=ps.reduce((a,p)=>a+p[0],0)/4, cy=ps.reduce((a,p)=>a+p[1],0)/4;
+  ctx.fillStyle='#111827';
+  ctx.font=`${24*devicePixelRatio}px Arial`;
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText(label,cx,cy);
+}
+
+function animateFold(result){
+  if(animating) return;
+  animating=true;
+  canRotateCube=false;
+  currentFinalFaces=[];
+  checkBtn.disabled=true;
+  msg.style.display='none';
+
+  if(result.placed.length===0){ show('정사각형을 먼저 놓아 주세요.',false); animating=false; checkBtn.disabled=false; return; }
+
+  foldCanvas.style.display='block';
+  board.style.display='none';
+  resizeCanvas();
+
+  const placed=result.placed;
+  const minX=Math.min(...placed.map(s=>s.gx));
+  const maxX=Math.max(...placed.map(s=>s.gx));
+  const minY=Math.min(...placed.map(s=>s.gy));
+  const maxY=Math.max(...placed.map(s=>s.gy));
+  const cx=(minX+maxX+1)/2;
+  const cy=(minY+maxY+1)/2;
+
+  const startFaces=placed.map(s=>{
+    const x=(s.gx-cx)*faceSize, y=(s.gy-cy)*faceSize;
+    return {key:`${s.gx},${s.gy}`,id:s.id, pts:[[x,y,0],[x+faceSize,y,0],[x+faceSize,y+faceSize,0],[x,y+faceSize,0]]};
+  });
+
+  let finalFaces=[];
+  function buildFaces(e){
+    const faces=startFaces.map(f=>{
+      let normal, up, right;
+      if(result.normals && result.normals.has(f.key)){
+        normal=result.normals.get(f.key); up=result.upv.get(f.key); right=result.rightv.get(f.key);
+      }else{
+        [normal,up,right]=fallbackOrientation(f.key);
+      }
+      const target=faceTarget(normal,up,right);
+      const pts=f.pts.map((p,i)=>mix(p,target[i],e));
+      const avg=pts.reduce((a,p)=>a+rot(p)[2],0)/4;
+      return {...f,pts,avg};
+    }).sort((a,b)=>a.avg-b.avg);
+    finalFaces=faces;
+    return faces;
+  }
+
+  function drawFaces(faces){
+    ctx.clearRect(0,0,W,H);
+    for(const f of faces) drawFace(f.pts,colors[f.id],f.id+1);
+  }
+
+  const start=performance.now(), dur=3000;
+  function foldFrame(now){
+    const t=Math.min(1,(now-start)/dur), e=ease(t);
+    drawFaces(buildFaces(e));
+
+    if(t<1) requestAnimationFrame(foldFrame);
+    else{
+      drawFaces(finalFaces);
+      show(result.ok?'🎉 정육면체가 완성되었어요! 손으로 돌리고 확대해 보세요.':'😊 다시 만들어 볼까요? 손으로 돌려 확인해 보세요.',result.ok);
+      currentFinalFaces=finalFaces;
+      canRotateCube=true;
+      if(zoomPanel) zoomPanel.style.display='flex';
+      animating=false;
+      checkBtn.disabled=false;
+    }
+  }
+  requestAnimationFrame(foldFrame);
+}
+function redrawCurrentCube(){
+  if(!canRotateCube || !currentFinalFaces.length) return;
+  ctx.clearRect(0,0,W,H);
+  const faces=currentFinalFaces.map(f=>{
+    const avg=f.pts.reduce((a,p)=>a+rot(p)[2],0)/4;
+    return {...f,avg};
+  }).sort((a,b)=>a.avg-b.avg);
+  for(const f of faces) drawFace(f.pts,colors[f.id],f.id+1);
+}
+function touchInfo(touches){
+  const a=touches[0], b=touches[1];
+  const dx=b.clientX-a.clientX, dy=b.clientY-a.clientY;
+  return {x:(a.clientX+b.clientX)/2,y:(a.clientY+b.clientY)/2,dist:Math.hypot(dx,dy),angle:Math.atan2(dy,dx)};
+}
+
+const zoomPanel=document.getElementById('zoomPanel');
+const zoomInBtn=document.getElementById('zoomInBtn');
+const zoomOutBtn=document.getElementById('zoomOutBtn');
+const zoomResetBtn=document.getElementById('zoomResetBtn');
+
+function setZoom(v){
+  zoom = Math.max(0.45, Math.min(3.2, v));
+  redrawCurrentCube();
+}
+
+let isRotating=false;
+let lastOneTouch=null;
+let lastPinch=null;
+let pinchStarted=false;
+
+foldCanvas.addEventListener('touchstart',e=>{
+  prevent(e);
+  if(!canRotateCube) return;
+
+  if(e.touches.length===1){
+    const t=e.touches[0];
+    isRotating=true;
+    pinchStarted=false;
+    lastOneTouch={x:t.clientX,y:t.clientY};
+    lastPinch=null;
+  }
+
+  if(e.touches.length>=2){
+    isRotating=false;
+    pinchStarted=true;
+    lastOneTouch=null;
+    lastPinch=touchInfo(e.touches);
+  }
+}, {passive:false});
+
+foldCanvas.addEventListener('touchmove',e=>{
+  prevent(e);
+  if(!canRotateCube) return;
+
+  if(e.touches.length>=2){
+    const now=touchInfo(e.touches);
+    if(lastPinch && lastPinch.dist){
+      const ratio = now.dist / lastPinch.dist;
+      setZoom(zoom * ratio);
+    }
+    lastPinch=now;
+    isRotating=false;
+    pinchStarted=true;
+    return;
+  }
+
+  if(e.touches.length===1 && isRotating && !pinchStarted && lastOneTouch){
+    const t=e.touches[0];
+    const dx=t.clientX-lastOneTouch.x;
+    const dy=t.clientY-lastOneTouch.y;
+    rotY += dx*0.01;
+    rotX += dy*0.01;
+    lastOneTouch={x:t.clientX,y:t.clientY};
+    redrawCurrentCube();
+  }
+}, {passive:false});
+
+foldCanvas.addEventListener('touchend',e=>{
+  prevent(e);
+  if(e.touches.length===0){
+    isRotating=false;
+    lastOneTouch=null;
+    lastPinch=null;
+    setTimeout(()=>{pinchStarted=false;},80);
+  }else if(e.touches.length===1){
+    const t=e.touches[0];
+    lastOneTouch={x:t.clientX,y:t.clientY};
+    lastPinch=null;
+    isRotating=!pinchStarted;
+  }
+}, {passive:false});
+
+foldCanvas.addEventListener('touchcancel',e=>{
+  prevent(e);
+  isRotating=false;
+  lastOneTouch=null;
+  lastPinch=null;
+  pinchStarted=false;
+}, {passive:false});
+
+/* PC 마우스용 회전 */
+foldCanvas.addEventListener('pointerdown',e=>{
+  if(e.pointerType==='touch') return;
+  prevent(e);
+  if(!canRotateCube) return;
+  canvasTouchMode=true;
+  lastTouches=[{x:e.clientX,y:e.clientY}];
+  try{foldCanvas.setPointerCapture(e.pointerId)}catch(err){}
+}, {passive:false});
+foldCanvas.addEventListener('pointermove',e=>{
+  if(e.pointerType==='touch') return;
+  prevent(e);
+  if(!canRotateCube || !canvasTouchMode) return;
+  const last=lastTouches[0];
+  if(!last) return;
+  rotY += (e.clientX-last.x)*0.01;
+  rotX += (e.clientY-last.y)*0.01;
+  lastTouches=[{x:e.clientX,y:e.clientY}];
+  redrawCurrentCube();
+}, {passive:false});
+foldCanvas.addEventListener('pointerup',e=>{ if(e.pointerType!=='touch'){prevent(e); canvasTouchMode=false;} }, {passive:false});
+foldCanvas.addEventListener('pointercancel',e=>{ if(e.pointerType!=='touch'){prevent(e); canvasTouchMode=false;} }, {passive:false});
+
+zoomInBtn.addEventListener('click',e=>{prevent(e); setZoom(zoom*1.18);}, {passive:false});
+zoomOutBtn.addEventListener('click',e=>{prevent(e); setZoom(zoom/1.18);}, {passive:false});
+zoomResetBtn.addEventListener('click',e=>{prevent(e); setZoom(1);}, {passive:false});
+zoomInBtn.addEventListener('touchend',e=>{prevent(e); setZoom(zoom*1.18);}, {passive:false});
+zoomOutBtn.addEventListener('touchend',e=>{prevent(e); setZoom(zoom/1.18);}, {passive:false});
+zoomResetBtn.addEventListener('touchend',e=>{prevent(e); setZoom(1);}, {passive:false});
+
+function runCheck(e){ prevent(e); animateFold(analyzeNet()); }
+function runReset(e){ prevent(e); makePieces(); }
+
+checkBtn.addEventListener('click', runCheck, {passive:false});
+checkBtn.addEventListener('touchend', runCheck, {passive:false});
+resetBtn.addEventListener('click', runReset, {passive:false});
+resetBtn.addEventListener('touchend', runReset, {passive:false});
+
+function init(){boardCenter();drawGuideCells();makePieces();}
+addEventListener('resize',()=>{boardCenter();drawGuideCells();redrawCurrentCube();});
+init();
+</script>
+</body>
+</html>
