@@ -1,0 +1,513 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>정육면체 전개도 조합하기</title>
+<style>
+*{box-sizing:border-box}
+html,body{touch-action:none;overscroll-behavior:none}
+body{margin:0;font-family:Arial,'Noto Sans KR',sans-serif;background:#f7fbff;color:#111827;overflow:hidden;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+header{height:64px;background:#2563eb;color:white;display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:900}
+.wrap{display:flex;height:calc(100vh - 64px)}
+aside{width:310px;background:white;border-right:2px solid #dbeafe;padding:18px;z-index:5}
+h2{font-size:19px;margin:8px 0 12px}
+p{line-height:1.55;font-weight:800;font-size:15px}
+.btn{width:100%;height:52px;margin:8px 0;border:0;border-radius:12px;background:#2563eb;color:white;font-size:19px;font-weight:900;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+.btn:disabled{opacity:.55;cursor:not-allowed}
+.btn.gray{background:#64748b}
+.btn.green{background:#16a34a}
+.pieceBox{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:12px}
+.piece{
+  touch-action:none;
+  -webkit-user-select:none;
+  user-select:none;
+  -webkit-tap-highlight-color:transparent;
+  width:128px;
+  height:128px;
+  border:4px solid #111827;
+  border-radius:9px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:40px;
+  font-weight:900;
+  cursor:grab;
+  user-select:none;
+  transition:transform .12s;
+}
+.piece:active{transform:scale(1.06)}
+main{flex:1;position:relative;overflow:hidden;touch-action:none;overscroll-behavior:none;background-image:linear-gradient(#e5f0ff 1px,transparent 1px),linear-gradient(90deg,#e5f0ff 1px,transparent 1px);background-size:56px 56px}
+#board{position:absolute;inset:0;touch-action:none;overscroll-behavior:none}
+#foldCanvas{position:absolute;inset:0;width:100%;height:100%;display:none;background:#f7fbff;z-index:20;touch-action:none}
+.cell{position:absolute;width:96px;height:96px;border:3px dashed #93c5fd;border-radius:8px;background:rgba(255,255,255,.45)}
+.cell.center{border:3px dashed #93c5fd;background:rgba(255,255,255,.45)}
+.cell.hover{background:#bfdbfe;border-color:#1d4ed8}
+.square{
+  position:absolute;
+  touch-action:none;
+  -webkit-user-select:none;
+  user-select:none;
+  -webkit-tap-highlight-color:transparent;
+  width:96px;
+  height:96px;
+  border:4px solid #111827;
+  border-radius:9px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:34px;
+  font-weight:900;
+  cursor:grab;
+  touch-action:none;
+  user-select:none;
+  box-shadow:0 6px 14px rgba(0,0,0,.12);
+  transition:transform .12s;
+}
+.square.dragging{transform:scale(1.08);z-index:30}
+.message{position:absolute;left:50%;top:24px;transform:translateX(-50%);background:white;border:4px solid #2563eb;color:#1d4ed8;border-radius:18px;padding:16px 32px;font-size:30px;font-weight:900;box-shadow:0 10px 24px rgba(0,0,0,.14);display:none;z-index:60;text-align:center}
+.guide{position:absolute;left:50%;bottom:18px;transform:translateX(-50%);background:white;border:2px solid #dbeafe;border-radius:999px;padding:12px 20px;font-weight:900;z-index:3}
+</style>
+</head>
+<body>
+<header>정육면체 전개도 직접 조합하기</header>
+<div class="wrap">
+<aside>
+  <h2>활동 방법</h2>
+  <p>• 정사각형을 끌어 전개도를 만들어요.</p>
+  <p>• <b>검사하기</b>를 눌러 접히는 모습을 확인해요.</p>
+  <p>• <b>다시 하기</b>를 눌러 다시 만들어요.</p>
+  <button class="btn green" id="checkBtn">검사하기</button>
+  <button class="btn gray" id="resetBtn">다시 하기</button>
+  <h2>정사각형 6개</h2>
+  <div class="pieceBox" id="pieceBox"></div>
+</aside>
+<main id="main">
+  <div id="board"></div>
+  <canvas id="foldCanvas"></canvas>
+  <div class="message" id="msg"></div>
+  <div class="guide">빈 칸 어디에나 정사각형을 드래그해서 놓으세요.</div>
+</main>
+</div>
+
+<script>
+const main=document.getElementById('main');
+const board=document.getElementById('board');
+const pieceBox=document.getElementById('pieceBox');
+const msg=document.getElementById('msg');
+const foldCanvas=document.getElementById('foldCanvas');
+const ctx=foldCanvas.getContext('2d');
+const checkBtn=document.getElementById('checkBtn');
+
+const cellSize=96;
+const faceSize=132;
+let origin={x:0,y:0};
+let squares=[];
+let W=0,H=0, animating=false;
+let rotX=-0.62, rotY=0.72;
+let cubeScale=1.38;
+let hoverCell=null;
+let canRotateCube=false;
+let currentFinalFaces=[];
+let canvasDragging=false;
+let lastCanvasX=0;
+let lastCanvasY=0;
+const colors=['#ff8fab','#ffd166','#8fe09b','#7fd3f7','#bd9af3','#ffc16e'];
+
+document.addEventListener('touchmove', function(e){
+  if(e.target.closest('#board') || e.target.closest('#foldCanvas')) e.preventDefault();
+}, {passive:false});
+document.addEventListener('gesturestart', function(e){ e.preventDefault(); }, {passive:false});
+
+function resizeCanvas(){
+  const r=main.getBoundingClientRect();
+  W=foldCanvas.width=Math.max(1,Math.floor(r.width*devicePixelRatio));
+  H=foldCanvas.height=Math.max(1,Math.floor(r.height*devicePixelRatio));
+}
+function boardCenter(){
+  const r=board.getBoundingClientRect();
+  origin.x=Math.round((r.width/2-cellSize/2)/cellSize)*cellSize;
+  origin.y=Math.round((r.height/2-cellSize/2)/cellSize)*cellSize;
+  resizeCanvas();
+}
+function gridToPx(gx,gy){return {x:origin.x+gx*cellSize, y:origin.y+gy*cellSize}}
+function pxToGrid(x,y){return {gx:Math.round((x-origin.x)/cellSize), gy:Math.round((y-origin.y)/cellSize)}}
+
+function drawGuideCells(){
+  board.querySelectorAll('.cell').forEach(e=>e.remove());
+  for(let gx=-3;gx<=3;gx++){
+    for(let gy=-3;gy<=3;gy++){
+      const p=gridToPx(gx,gy);
+      const c=document.createElement('div');
+      c.className='cell';
+      c.dataset.gx=gx; c.dataset.gy=gy;
+      c.style.left=p.x+'px'; c.style.top=p.y+'px';
+      board.appendChild(c);
+    }
+  }
+}
+function setHover(gx,gy){
+  if(hoverCell) hoverCell.classList.remove('hover');
+  hoverCell=board.querySelector(`.cell[data-gx="${gx}"][data-gy="${gy}"]`);
+  if(hoverCell) hoverCell.classList.add('hover');
+}
+function clearHover(){
+  if(hoverCell) hoverCell.classList.remove('hover');
+  hoverCell=null;
+}
+function makePieces(){
+  pieceBox.innerHTML='';
+  squares.forEach(s=>s.el.remove());
+  squares=[];
+  foldCanvas.style.display='none';
+  board.style.display='block';
+  msg.style.display='none';
+  animating=false;
+  canRotateCube=false;
+  currentFinalFaces=[];
+  checkBtn.disabled=false;
+  for(let i=0;i<6;i++){
+    const p=document.createElement('div');
+    p.className='piece';
+    p.style.background=colors[i];
+    p.textContent=i+1;
+    p.draggable=false;
+    pieceBox.appendChild(p);
+    p.addEventListener('pointerdown',e=>{
+      if(animating) return;
+      const sq=createSquare(i, e.clientX-cellSize/2, e.clientY-cellSize/2);
+      startDrag(e,sq);
+    });
+  }
+}
+function createSquare(i,left,top){
+  const sq=document.createElement('div');
+  sq.className='square';
+  sq.style.background=colors[i];
+  sq.textContent=i+1;
+  board.appendChild(sq);
+  const b=board.getBoundingClientRect();
+  const obj={id:i,el:sq,gx:null,gy:null,x:left-b.left,y:top-b.top};
+  squares.push(obj);
+  setPos(obj,obj.x,obj.y);
+  sq.addEventListener('pointerdown',e=>{if(!animating)startDrag(e,obj)});
+  return obj;
+}
+function setPos(obj,x,y){
+  obj.x=x; obj.y=y;
+  obj.el.style.left=x+'px'; obj.el.style.top=y+'px';
+}
+let activeDrag=null;
+function startDrag(e,obj){
+  if(e.pointerType==='mouse' && e.button!==0) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const b=board.getBoundingClientRect();
+  const pointerX=e.clientX-b.left;
+  const pointerY=e.clientY-b.top;
+  const fingerLift = (e.pointerType==='touch' || e.pointerType==='pen') ? 28 : 0;
+  const offX=pointerX-obj.x;
+  const offY=pointerY-obj.y+fingerLift;
+  activeDrag={obj,pointerId:e.pointerId,offX,offY,fingerLift};
+  obj.el.classList.add('dragging');
+  obj.el.style.zIndex=1000;
+  try{obj.el.setPointerCapture(e.pointerId);}catch(err){}
+  window.addEventListener('pointermove',windowDragMove,{passive:false});
+  window.addEventListener('pointerup',windowDragEnd,{passive:false});
+  window.addEventListener('pointercancel',windowDragEnd,{passive:false});
+}
+function windowDragMove(ev){
+  if(!activeDrag || ev.pointerId!==activeDrag.pointerId) return;
+  ev.preventDefault();
+  const b=board.getBoundingClientRect();
+  const x=ev.clientX-b.left-activeDrag.offX;
+  const y=ev.clientY-b.top-activeDrag.offY;
+  setPos(activeDrag.obj,x,y);
+  const centerX=x+cellSize/2;
+  const centerY=y+cellSize/2;
+  const g=pxToGrid(centerX-cellSize/2,centerY-cellSize/2);
+  setHover(g.gx,g.gy);
+}
+function windowDragEnd(ev){
+  if(!activeDrag || ev.pointerId!==activeDrag.pointerId) return;
+  ev.preventDefault();
+  const obj=activeDrag.obj;
+  try{obj.el.releasePointerCapture(ev.pointerId);}catch(err){}
+  obj.el.classList.remove('dragging');
+  obj.el.style.zIndex='';
+  window.removeEventListener('pointermove',windowDragMove);
+  window.removeEventListener('pointerup',windowDragEnd);
+  window.removeEventListener('pointercancel',windowDragEnd);
+  activeDrag=null;
+  clearHover();
+  snap(obj);
+}
+function snap(obj){
+  const g=pxToGrid(obj.x,obj.y);
+  if(g.gx<-3||g.gx>3||g.gy<-3||g.gy>3){ obj.el.remove(); squares=squares.filter(s=>s!==obj); return; }
+  const occupied=squares.find(s=>s!==obj && s.gx===g.gx && s.gy===g.gy);
+  if(occupied){ show('이미 놓인 칸이에요!',false); return; }
+  obj.gx=g.gx; obj.gy=g.gy;
+  const p=gridToPx(obj.gx,obj.gy);
+  obj.el.style.transition='left .14s, top .14s, transform .12s';
+  setPos(obj,p.x,p.y);
+  setTimeout(()=>obj.el.style.transition='transform .12s',160);
+}
+function show(text,success){
+  msg.textContent=text;
+  msg.style.display='block';
+  msg.style.borderColor=success?'#16a34a':'#ef4444';
+  msg.style.color=success?'#16a34a':'#ef4444';
+}
+
+function analyzeNet(){
+  const placed=squares.filter(s=>s.gx!==null);
+  const cells=placed.map(s=>`${s.gx},${s.gy}`);
+  const set=new Set(cells);
+  const basicOK=placed.length===6 && set.size===6;
+  let normals=new Map(), upv=new Map(), rightv=new Map();
+  const startKey = placed.length ? `${placed[0].gx},${placed[0].gy}` : null;
+  if(startKey){
+    normals.set(startKey,[0,0,1]);
+    upv.set(startKey,[0,-1,0]);
+    rightv.set(startKey,[1,0,0]);
+    let queue=[startKey];
+    function neg(v){return v.map(a=>-a)}
+    while(queue.length){
+      const key=queue.shift();
+      const [x,y]=key.split(',').map(Number);
+      const n=normals.get(key), u=upv.get(key), r=rightv.get(key);
+      for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){
+        const nk=`${x+dx},${y+dy}`;
+        if(!set.has(nk)||normals.has(nk)) continue;
+        let nn,nu,nr;
+        if(dx===1){ nn=r; nu=u; nr=neg(n); }
+        if(dx===-1){ nn=neg(r); nu=u; nr=n; }
+        if(dy===1){ nn=neg(u); nu=n; nr=r; }
+        if(dy===-1){ nn=u; nu=neg(n); nr=r; }
+        normals.set(nk,nn); upv.set(nk,nu); rightv.set(nk,nr);
+        queue.push(nk);
+      }
+    }
+  }
+  let connected=false;
+  if(placed.length>0){
+    const arr=[...set].map(v=>v.split(',').map(Number));
+    const q=[arr[0]], seen=new Set([arr[0].join(',')]);
+    while(q.length){
+      const [x,y]=q.shift();
+      for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){
+        const key=`${x+dx},${y+dy}`;
+        if(set.has(key)&&!seen.has(key)){seen.add(key);q.push([x+dx,y+dy]);}
+      }
+    }
+    connected=seen.size===set.size;
+  }
+  const normalSet=new Set([...normals.values()].map(v=>v.join(',')));
+  const ok=basicOK && connected && normals.size===6 && normalSet.size===6;
+  return {ok,set,placed,normals,upv,rightv,startKey};
+}
+
+function ease(t){return t<.5?2*t*t:1-Math.pow(-2*t+2,2)/2}
+function rotWith(p,rx,ry){
+  let [x,y,z]=p;
+  let cy=Math.cos(ry), sy=Math.sin(ry), cx=Math.cos(rx), sx=Math.sin(rx);
+  let x1=x*cy+z*sy, z1=-x*sy+z*cy;
+  let y1=y*cx-z1*sx, z2=y*sx+z1*cx;
+  return [x1,y1,z2];
+}
+function rot(p){return rotWith(p,rotX,rotY)}
+function projCustom(p,rx,ry,viewScale){
+  p=rotWith(p,rx,ry);
+  let f=780/(780-p[2]);
+  return [W/2+p[0]*f*viewScale,H/2+p[1]*f*viewScale,p[2]];
+}
+function proj(p){return projCustom(p,rotX,rotY,cubeScale)}
+function mix(a,b,t){return [a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t,a[2]+(b[2]-a[2])*t]}
+function faceTarget(normal, up, right){
+  const s=faceSize, c=normal.map(v=>v*s/2);
+  return [
+    c.map((v,i)=>v-right[i]*s/2-up[i]*s/2),
+    c.map((v,i)=>v+right[i]*s/2-up[i]*s/2),
+    c.map((v,i)=>v+right[i]*s/2+up[i]*s/2),
+    c.map((v,i)=>v-right[i]*s/2+up[i]*s/2)
+  ];
+}
+function fallbackOrientation(key){
+  const [x,y]=key.split(',').map(Number);
+  if(x===0&&y===0) return [[0,0,1],[0,-1,0],[1,0,0]];
+  if(Math.abs(x)>=Math.abs(y)) return [x>0?[1,0,0]:[-1,0,0],[0,-1,0],x>0?[0,0,-1]:[0,0,1]];
+  return [[0,y>0?1:-1,0],y>0?[0,0,-1]:[0,0,1],[1,0,0]];
+}
+function drawFaceCustom(pts,color,label,rx,ry,viewScale){
+  const ps=pts.map(p=>projCustom(p,rx,ry,viewScale));
+  ctx.beginPath(); ctx.moveTo(ps[0][0],ps[0][1]);
+  for(let i=1;i<4;i++)ctx.lineTo(ps[i][0],ps[i][1]);
+  ctx.closePath();
+  ctx.fillStyle=color; ctx.fill();
+  ctx.lineWidth=4*devicePixelRatio; ctx.strokeStyle='#111827'; ctx.stroke();
+  const cx=ps.reduce((a,p)=>a+p[0],0)/4, cy=ps.reduce((a,p)=>a+p[1],0)/4;
+  ctx.fillStyle='#111827';
+  ctx.font=`${24*devicePixelRatio}px Arial`;
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText(label,cx,cy);
+}
+function drawFace(pts,color,label){
+  drawFaceCustom(pts,color,label,rotX,rotY,cubeScale);
+}
+
+function animateFold(result){
+  if(animating) return;
+  animating=true;
+  canRotateCube=false;
+  currentFinalFaces=[];
+  checkBtn.disabled=true;
+  msg.style.display='none';
+  if(result.placed.length===0){ show('정사각형을 먼저 놓아 주세요.',false); animating=false; checkBtn.disabled=false; return; }
+
+  foldCanvas.style.display='block';
+  board.style.display='none';
+  resizeCanvas();
+
+  const placed=result.placed;
+  const minX=Math.min(...placed.map(s=>s.gx));
+  const maxX=Math.max(...placed.map(s=>s.gx));
+  const minY=Math.min(...placed.map(s=>s.gy));
+  const maxY=Math.max(...placed.map(s=>s.gy));
+  const cx=(minX+maxX+1)/2;
+  const cy=(minY+maxY+1)/2;
+
+  // 학생이 조합한 전개도 모양을 넓게 유지한 채 시작하도록 실제 접기 전개도 좌표를 크게 잡음
+  const startFaces=placed.map(s=>{
+    const x=(s.gx-cx)*faceSize, y=(s.gy-cy)*faceSize;
+    return {key:`${s.gx},${s.gy}`,id:s.id, pts:[[x,y,0],[x+faceSize,y,0],[x+faceSize,y+faceSize,0],[x,y+faceSize,0]]};
+  });
+
+  let finalFaces=[];
+  function buildFaces(e){
+    const faces=startFaces.map(f=>{
+      let normal, up, right;
+      if(result.normals && result.normals.has(f.key)){
+        normal=result.normals.get(f.key); up=result.upv.get(f.key); right=result.rightv.get(f.key);
+      }else{
+        [normal,up,right]=fallbackOrientation(f.key);
+      }
+      const target=faceTarget(normal,up,right);
+      const pts=f.pts.map((p,i)=>mix(p,target[i],e));
+      const avg=pts.reduce((a,p)=>a+rot(p)[2],0)/4;
+      return {...f,pts,avg};
+    }).sort((a,b)=>a.avg-b.avg);
+    finalFaces=faces;
+    return faces;
+  }
+
+  function drawFaces(faces,rx,ry,viewScale){
+    ctx.clearRect(0,0,W,H);
+    for(const f of faces) drawFaceCustom(f.pts,colors[f.id],f.id+1,rx,ry,viewScale);
+  }
+
+  const start=performance.now(), holdDur=950, foldDur=3400, total=holdDur+foldDur;
+  function frame(now){
+    const elapsed=now-start;
+    let e=0;
+
+    // 1단계: 전개도를 정면에서 넓게 보여 줌
+    // 2단계: 그 전개도가 보이는 상태에서 천천히 접힘
+    if(elapsed<holdDur){
+      e=0;
+      drawFaces(buildFaces(0),0,0,1.28);
+    }else{
+      const t=Math.min(1,(elapsed-holdDur)/foldDur);
+      e=ease(t);
+      const rx=0+(rotX-0)*e;
+      const ry=0+(rotY-0)*e;
+      const viewScale=1.28+(cubeScale-1.28)*e;
+      drawFaces(buildFaces(e),rx,ry,viewScale);
+    }
+
+    if(elapsed<total) requestAnimationFrame(frame);
+    else{
+      drawFaces(finalFaces,rotX,rotY,cubeScale);
+      show(result.ok?'🎉 정육면체가 완성되었어요! 손으로 돌려 보세요.':'😊 다시 만들어 볼까요? 손으로 돌려 확인해 보세요.',result.ok);
+      currentFinalFaces=finalFaces;
+      canRotateCube=true;
+      animating=false;
+      checkBtn.disabled=false;
+    }
+  }
+  requestAnimationFrame(frame);
+}
+
+function redrawCurrentCube(){
+  if(!canRotateCube || !currentFinalFaces.length) return;
+  ctx.clearRect(0,0,W,H);
+  const faces=currentFinalFaces.map(f=>{
+    const avg=f.pts.reduce((a,p)=>a+rot(p)[2],0)/4;
+    return {...f,avg};
+  }).sort((a,b)=>a.avg-b.avg);
+  for(const f of faces) drawFace(f.pts,colors[f.id],f.id+1);
+}
+
+foldCanvas.addEventListener('pointerdown',e=>{
+  if(!canRotateCube) return;
+  canvasDragging=true;
+  lastCanvasX=e.clientX;
+  lastCanvasY=e.clientY;
+  foldCanvas.setPointerCapture(e.pointerId);
+});
+foldCanvas.addEventListener('pointermove',e=>{
+  if(!canRotateCube || !canvasDragging) return;
+  const dx=e.clientX-lastCanvasX;
+  const dy=e.clientY-lastCanvasY;
+  rotY += dx*0.01;
+  rotX += dy*0.01;
+  lastCanvasX=e.clientX;
+  lastCanvasY=e.clientY;
+  redrawCurrentCube();
+});
+foldCanvas.addEventListener('pointerup',e=>{
+  canvasDragging=false;
+  try{foldCanvas.releasePointerCapture(e.pointerId);}catch(err){}
+});
+foldCanvas.addEventListener('pointercancel',()=>{ canvasDragging=false; });
+
+
+// 마우스 휠 확대/축소
+foldCanvas.addEventListener('wheel',e=>{
+  if(!canRotateCube) return;
+  e.preventDefault();
+  cubeScale += (e.deltaY<0?0.08:-0.08);
+  cubeScale=Math.max(0.7,Math.min(2.6,cubeScale));
+  redrawCurrentCube();
+},{passive:false});
+
+// 두 손가락 핀치 확대/축소
+let pinchStart=null,startScale=1;
+function dist(a,b){return Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY);}
+foldCanvas.addEventListener('touchstart',e=>{
+  if(!canRotateCube) return;
+  if(e.touches.length===2){
+    pinchStart=dist(e.touches[0],e.touches[1]);
+    startScale=cubeScale;
+  }
+},{passive:false});
+foldCanvas.addEventListener('touchmove',e=>{
+  if(!canRotateCube) return;
+  if(e.touches.length===2 && pinchStart){
+    e.preventDefault();
+    cubeScale=startScale*(dist(e.touches[0],e.touches[1])/pinchStart);
+    cubeScale=Math.max(0.7,Math.min(2.6,cubeScale));
+    redrawCurrentCube();
+  }
+},{passive:false});
+foldCanvas.addEventListener('touchend',()=>{pinchStart=null;});
+
+document.getElementById('checkBtn').onclick=()=>animateFold(analyzeNet());
+document.getElementById('resetBtn').onclick=()=>makePieces();
+
+function init(){boardCenter();drawGuideCells();makePieces();}
+addEventListener('resize',()=>{boardCenter();drawGuideCells();});
+init();
+</script>
+</body>
+</html>
