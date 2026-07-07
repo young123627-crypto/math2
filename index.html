@@ -1,0 +1,417 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>전개도 → 입체도형 (자연스럽게 접기)</title>
+<style>
+:root{--blue:#2563eb;--ink:#111827;--bg:#f8fbff;--grid:#eaf2ff}
+*{box-sizing:border-box}
+body{margin:0;font-family:Arial,'Noto Sans KR',sans-serif;background:var(--bg);color:var(--ink);overflow:hidden}
+header{height:56px;display:flex;align-items:center;padding:0 22px;border-bottom:1px solid #d7e5f7;background:white;font-size:26px;font-weight:900}
+header b{color:#1d4ed8;margin-right:8px}
+.app{height:calc(100vh - 56px);display:flex}
+aside{width:285px;background:#fff;border-right:1px solid #d7e5f7;padding:18px;overflow:auto}
+h3{font-size:16px;margin:18px 0 10px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.btn{height:46px;border:1.5px solid #cbdcf4;background:#fff;border-radius:10px;font-size:15px;font-weight:900;cursor:pointer}
+.btn.active,.primary{background:var(--blue);color:white;border-color:var(--blue)}
+.primary{width:100%;margin-top:6px}
+.netgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.netcard{height:112px;border:1.5px solid #d7e5f7;border-radius:10px;background:white;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;font-weight:900;cursor:pointer}
+.netcard.active{border:3px solid var(--blue);color:var(--blue)}
+.thumb{width:96px;height:58px}
+main{flex:1;position:relative;background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);background-size:32px 32px}
+#stage{width:100%;height:100%;display:block;touch-action:none;cursor:grab}
+#stage:active{cursor:grabbing}
+.label{position:absolute;top:18px;left:28px;background:#2563eb;color:white;padding:12px 18px;border-radius:10px;font-weight:900;font-size:18px;box-shadow:0 8px 18px rgba(37,99,235,.18)}
+.hint{position:absolute;right:24px;top:18px;background:white;border:1px solid #cfe0f5;border-radius:999px;padding:10px 16px;font-weight:900;font-size:14px}
+.toast{position:absolute;left:50%;bottom:22px;transform:translateX(-50%);background:white;border:1px solid #cfe0f5;border-radius:12px;padding:12px 20px;font-weight:900;color:#1d4ed8;box-shadow:0 6px 20px rgba(15,23,42,.08)}
+</style>
+</head>
+<body>
+<header><b>전개도</b> → 입체도형</header>
+<div class="app">
+<aside>
+  <h3>도형 선택</h3>
+  <div class="row">
+    <button class="btn active" id="cubeBtn">정육면체</button>
+    <button class="btn" id="cuboidBtn">직육면체</button>
+  </div>
+
+  <h3 id="netTitle">전개도 선택</h3>
+  <div class="netgrid">
+    <div class="netcard active" data-net="0"><canvas class="thumb"></canvas><span>유형 1</span></div>
+    <div class="netcard" data-net="1"><canvas class="thumb"></canvas><span>유형 2</span></div>
+    <div class="netcard" data-net="2"><canvas class="thumb"></canvas><span>유형 3</span></div>
+    <div class="netcard" data-net="3"><canvas class="thumb"></canvas><span>유형 4</span></div>
+  </div>
+
+  <h3>활동</h3>
+  <button class="btn primary" id="foldBtn">입체도형으로 접기</button>
+  <button class="btn" style="width:100%;margin-top:10px" id="unfoldBtn">전개도로 펼치기</button>
+</aside>
+
+<main>
+  <div class="label">전개도 / 접히는 과정</div>
+  <div class="hint">드래그·터치: 회전 · 두 손가락: 확대/축소</div>
+  <canvas id="stage"></canvas>
+  <div class="toast" id="toast">전개도도 터치하거나 드래그해서 회전할 수 있어요.</div>
+</main>
+</div>
+
+<script>
+const canvas=document.getElementById('stage'), ctx=canvas.getContext('2d');
+const cubeBtn=document.getElementById('cubeBtn'), cuboidBtn=document.getElementById('cuboidBtn');
+const foldBtn=document.getElementById('foldBtn'), unfoldBtn=document.getElementById('unfoldBtn');
+const netTitle=document.getElementById('netTitle'), toast=document.getElementById('toast');
+
+let W=0,H=0,shape='cube',net=0,progress=0,anim=null,scale=1;
+let rotX=0, rotY=0;
+let pointers=new Map(), lastPinch=null, lastX=0,lastY=0, dragging=false;
+
+const colors=['#ff9eb3','#ffd56b','#96e6a1','#8ed8ff','#c9a7ff','#ffbd73'];
+
+function resize(){
+  W=canvas.width=canvas.clientWidth*devicePixelRatio;
+  H=canvas.height=canvas.clientHeight*devicePixelRatio;
+  draw(); drawThumbs();
+}
+addEventListener('resize',resize);
+
+function ease(t){return t<.5?2*t*t:1-Math.pow(-2*t+2,2)/2}
+function dims(){return shape==='cube'?{w:145,h:145,d:145}:{w:230,h:120,d:120}}
+
+function rot(p){
+  let [x,y,z]=p;
+  let cy=Math.cos(rotY), sy=Math.sin(rotY), cx=Math.cos(rotX), sx=Math.sin(rotX);
+  let x1=x*cy+z*sy, z1=-x*sy+z*cy;
+  let y1=y*cx-z1*sx, z2=y*sx+z1*cx;
+  return [x1,y1,z2];
+}
+function proj(p){
+  p=rot(p);
+  let f=820/(820-p[2]);
+  return [W/2+p[0]*f*scale,H/2+p[1]*f*scale,p[2]];
+}
+function mix(a,b,t){return [a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t,a[2]+(b[2]-a[2])*t]}
+function rectPts(x,y,w,h){return [[x,y,0],[x+w,y,0],[x+w,y+h,0],[x,y+h,0]]}
+
+function flatCells(){
+  const {w,h,d}=dims();
+  if(shape==='cube'){
+    const s=w;
+    // 정육면체 전개도 4가지: 실제로 접었을 때 6면이 서로 겹치지 않고 정육면체가 되는 유형만 사용
+    const layouts=[
+      // 유형 1: 가로 4칸 + 위/아래 1칸
+      [[0,0,s,s],[-s,0,s,s],[s,0,s,s],[0,-s,s,s],[0,s,s,s],[2*s,0,s,s]],
+      // 유형 2: 세로 4칸 + 양옆 1칸
+      [[0,0,s,s],[0,-s,s,s],[0,s,s,s],[s,0,s,s],[-s,0,s,s],[0,2*s,s,s]],
+      // 유형 3: 가로 4칸 + 서로 다른 위치의 위/아래 1칸
+      [[0,0,s,s],[-s,0,s,s],[s,0,s,s],[2*s,0,s,s],[-s,-s,s,s],[s,s,s,s]],
+      // 유형 4: 계단형 전개도
+      [[0,0,s,s],[s,0,s,s],[s,s,s,s],[2*s,s,s,s],[2*s,2*s,s,s],[3*s,2*s,s,s]]
+    ];
+    return (layouts[net]||layouts[0]).map((r,i)=>({id:i,x:r[0],y:r[1],w:r[2],h:r[3]}));
+  }
+
+  // face order: 0 앞, 1 왼쪽, 2 오른쪽, 3 위, 4 아래, 5 뒤
+  // 직육면체는 긴 옆면 2개(w×h), 짧은 옆면 2개(d×h), 위·아래면 2개(w×d)로 구성
+  // 모든 유형은 실제로 접을 수 있는 6면 전개도만 사용
+  // 위·아래면이 앞면 또는 뒷면에 붙는 경우까지 접히는 방향을 맞춤
+  const layouts=[
+    // 유형 1: 사진 왼쪽과 비슷한 기본형
+    [{id:1,x:-d,y:0,w:d,h:h},{id:0,x:0,y:0,w:w,h:h},{id:2,x:w,y:0,w:d,h:h},{id:5,x:w+d,y:0,w:w,h:h},{id:3,x:0,y:-d,w:w,h:d},{id:4,x:w+d,y:h,w:w,h:d}],
+    // 유형 2: 위·아래면이 앞면과 뒷면에 붙은 기본형
+    [{id:1,x:-d,y:0,w:d,h:h},{id:0,x:0,y:0,w:w,h:h},{id:2,x:w,y:0,w:d,h:h},{id:5,x:w+d,y:0,w:w,h:h},{id:3,x:0,y:-d,w:w,h:d},{id:4,x:0,y:h,w:w,h:d}],
+    // 유형 3: 위면은 뒷면 위, 아래면은 앞면 아래
+    [{id:1,x:-d,y:0,w:d,h:h},{id:0,x:0,y:0,w:w,h:h},{id:2,x:w,y:0,w:d,h:h},{id:5,x:w+d,y:0,w:w,h:h},{id:3,x:w+d,y:-d,w:w,h:d},{id:4,x:0,y:h,w:w,h:d}],
+    // 유형 4: 위·아래면이 뒷면에 붙은 형태
+    [{id:1,x:-d,y:0,w:d,h:h},{id:0,x:0,y:0,w:w,h:h},{id:2,x:w,y:0,w:d,h:h},{id:5,x:w+d,y:0,w:w,h:h},{id:3,x:w+d,y:-d,w:w,h:d},{id:4,x:w+d,y:h,w:w,h:d}]
+  ];
+  return layouts[net]||layouts[0];
+}
+
+function centeredFlatFaces(){
+  const cells=flatCells();
+  const minX=Math.min(...cells.map(c=>c.x)), maxX=Math.max(...cells.map(c=>c.x+c.w));
+  const minY=Math.min(...cells.map(c=>c.y)), maxY=Math.max(...cells.map(c=>c.y+c.h));
+  const cx=(minX+maxX)/2, cy=(minY+maxY)/2;
+  return cells.map(c=>({id:c.id,x:c.x-cx,y:c.y-cy,w:c.w,h:c.h, pts:rectPts(c.x-cx,c.y-cy,c.w,c.h)}));
+}
+
+function finalFaceById(id){
+  const {w,h,d}=dims();
+  const faces=[
+    [[-w/2,-h/2,d/2],[w/2,-h/2,d/2],[w/2,h/2,d/2],[-w/2,h/2,d/2]],      // 앞
+    [[-w/2,-h/2,-d/2],[-w/2,-h/2,d/2],[-w/2,h/2,d/2],[-w/2,h/2,-d/2]],   // 왼쪽
+    [[w/2,-h/2,d/2],[w/2,-h/2,-d/2],[w/2,h/2,-d/2],[w/2,h/2,d/2]],       // 오른쪽
+    [[-w/2,-h/2,-d/2],[w/2,-h/2,-d/2],[w/2,-h/2,d/2],[-w/2,-h/2,d/2]],   // 위(기본: 앞면에 붙은 경우)
+    [[-w/2,h/2,d/2],[w/2,h/2,d/2],[w/2,h/2,-d/2],[-w/2,h/2,-d/2]],       // 아래(기본: 앞면에 붙은 경우)
+    [[w/2,-h/2,-d/2],[-w/2,-h/2,-d/2],[-w/2,h/2,-d/2],[w/2,h/2,-d/2]]    // 뒤
+  ];
+  return faces[id];
+}
+
+function almost(a,b){return Math.abs(a-b)<0.01}
+function overlapLen(a1,a2,b1,b2){return Math.min(a2,b2)-Math.max(a1,b1)}
+function attachedNeighbor(cell,cells,side){
+  for(const other of cells){
+    if(other===cell) continue;
+    const ox1=other.x, ox2=other.x+other.w, oy1=other.y, oy2=other.y+other.h;
+    const cx1=cell.x, cx2=cell.x+cell.w, cy1=cell.y, cy2=cell.y+cell.h;
+    if(side==='bottom' && almost(cy2,oy1) && overlapLen(cx1,cx2,ox1,ox2)>1) return other.id;
+    if(side==='top' && almost(cy1,oy2) && overlapLen(cx1,cx2,ox1,ox2)>1) return other.id;
+  }
+  return null;
+}
+function finalFaceForCell(cell,cells){
+  const {w,h,d}=dims();
+  // 위·아래면은 어느 면에 붙어 있느냐에 따라 꼭짓점 순서가 달라져야
+  // 왼쪽 전개도와 오른쪽 완성 입체도형이 정확히 일치함.
+  if(cell.id===3){
+    const attached=attachedNeighbor(cell,cells,'bottom');
+    if(attached===5){
+      return [[-w/2,-h/2,d/2],[w/2,-h/2,d/2],[w/2,-h/2,-d/2],[-w/2,-h/2,-d/2]]; // 뒤면 위에 붙은 위면
+    }
+  }
+  if(cell.id===4){
+    const attached=attachedNeighbor(cell,cells,'top');
+    if(attached===5){
+      return [[-w/2,h/2,-d/2],[w/2,h/2,-d/2],[w/2,h/2,d/2],[-w/2,h/2,d/2]]; // 뒤면 아래에 붙은 아래면
+    }
+  }
+  return finalFaceById(cell.id);
+}
+
+function vsub(a,b){return [a[0]-b[0],a[1]-b[1],a[2]-b[2]]}
+function vadd(a,b){return [a[0]+b[0],a[1]+b[1],a[2]+b[2]]}
+function vmul(a,k){return [a[0]*k,a[1]*k,a[2]*k]}
+function vdot(a,b){return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]}
+function vcross(a,b){return [a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]]}
+function vlen(a){return Math.hypot(a[0],a[1],a[2])||1}
+function vnorm(a){return vmul(a,1/vlen(a))}
+function rotateAroundAxis(p,a,b,ang){
+  const u=vnorm(vsub(b,a));
+  const x=vsub(p,a);
+  const c=Math.cos(ang), sn=Math.sin(ang);
+  const term1=vmul(x,c);
+  const term2=vmul(vcross(u,x),sn);
+  const term3=vmul(u,vdot(u,x)*(1-c));
+  return vadd(a,vadd(vadd(term1,term2),term3));
+}
+
+function relation(A,B){
+  const y1=Math.max(A.y,B.y), y2=Math.min(A.y+A.h,B.y+B.h);
+  const x1=Math.max(A.x,B.x), x2=Math.min(A.x+A.w,B.x+B.w);
+  if(Math.abs(A.x+A.w-B.x)<0.01 && y1<y2) return 'right';
+  if(Math.abs(B.x+B.w-A.x)<0.01 && y1<y2) return 'left';
+  if(Math.abs(A.y+A.h-B.y)<0.01 && x1<x2) return 'bottom';
+  if(Math.abs(B.y+B.h-A.y)<0.01 && x1<x2) return 'top';
+  return null;
+}
+function buildFoldTree(cells){
+  const root=Math.max(0,cells.findIndex(c=>c.id===0));
+  const parent=Array(cells.length).fill(-1), side=Array(cells.length).fill(null), children=Array.from({length:cells.length},()=>[]);
+  const q=[root]; parent[root]=root;
+  while(q.length){
+    const a=q.shift();
+    for(let b=0;b<cells.length;b++){
+      if(parent[b]!==-1 || a===b) continue;
+      const r=relation(cells[a],cells[b]);
+      if(r){ parent[b]=a; side[b]=r; children[a].push(b); q.push(b); }
+    }
+  }
+  return {root,parent,side,children};
+}
+function subtreeList(children,start){
+  const out=[], stack=[start];
+  while(stack.length){
+    const n=stack.pop(); out.push(n);
+    for(const c of children[n]) stack.push(c);
+  }
+  return out;
+}
+function hingeVertexIndexes(side){
+  if(side==='right') return [1,2];
+  if(side==='left') return [0,3];
+  if(side==='top') return [0,1];
+  if(side==='bottom') return [3,2];
+}
+function foldAngleForSide(side){
+  if(side==='right') return Math.PI/2;
+  if(side==='left') return -Math.PI/2;
+  if(side==='top') return Math.PI/2;
+  if(side==='bottom') return -Math.PI/2;
+  return 0;
+}
+
+function currentFaces(){
+  const cells=centeredFlatFaces();
+  const t=ease(progress);
+  const pts=cells.map(c=>c.pts.map(p=>[p[0],p[1],p[2]]));
+  const {root,side,children}=buildFoldTree(cells);
+
+  // 가운데 앞면(id 0)을 기준으로 고정하고, 연결된 모서리를 축으로 실제 종이를 접듯이 접습니다.
+  function applyNode(n){
+    for(const ch of children[n]){
+      const [i,j]=hingeVertexIndexes(side[ch]);
+      const a=pts[n][i], b=pts[n][j];
+      const ang=foldAngleForSide(side[ch])*t;
+      const sub=subtreeList(children,ch);
+      for(const k of sub){
+        pts[k]=pts[k].map(p=>rotateAroundAxis(p,a,b,ang));
+      }
+      applyNode(ch);
+    }
+  }
+  applyNode(root);
+
+  return cells.map((c,i)=>({ id:c.id, flat:c, pts:pts[i] }));
+}
+
+function edgeIndices(side){
+  if(side==='right') return [1,2];
+  if(side==='left') return [0,3];
+  if(side==='top') return [0,1];
+  if(side==='bottom') return [3,2];
+}
+
+function sharedEdges(cells){
+  const edges=[];
+  for(let a=0;a<cells.length;a++){
+    for(let b=a+1;b<cells.length;b++){
+      const A=cells[a],B=cells[b];
+      const y1=Math.max(A.y,B.y), y2=Math.min(A.y+A.h,B.y+B.h);
+      const x1=Math.max(A.x,B.x), x2=Math.min(A.x+A.w,B.x+B.w);
+      if(Math.abs(A.x+A.w-B.x)<0.01 && y1<y2) edges.push({face:a,side:'right'});
+      if(Math.abs(B.x+B.w-A.x)<0.01 && y1<y2) edges.push({face:a,side:'left'});
+      if(Math.abs(A.y+A.h-B.y)<0.01 && x1<x2) edges.push({face:a,side:'bottom'});
+      if(Math.abs(B.y+B.h-A.y)<0.01 && x1<x2) edges.push({face:a,side:'top'});
+    }
+  }
+  return edges;
+}
+
+function drawDashedProjected(p1,p2){
+  const a=proj(p1), b=proj(p2);
+  ctx.setLineDash([14*devicePixelRatio,10*devicePixelRatio]);
+  ctx.lineWidth=4*devicePixelRatio;
+  ctx.strokeStyle='#111827';
+  ctx.beginPath(); ctx.moveTo(a[0],a[1]); ctx.lineTo(b[0],b[1]); ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  const faces=currentFaces();
+  const sorted=faces.map((f,idx)=>({idx, id:f.id, pts:f.pts, avg:f.pts.reduce((s,p)=>s+rot(p)[2],0)/4}))
+                    .sort((a,b)=>a.avg-b.avg);
+
+  for(const f of sorted){
+    const ps=f.pts.map(proj);
+    ctx.beginPath(); ctx.moveTo(ps[0][0],ps[0][1]);
+    for(let i=1;i<4;i++) ctx.lineTo(ps[i][0],ps[i][1]);
+    ctx.closePath();
+    ctx.fillStyle=colors[f.id];
+    ctx.fill();
+    ctx.lineWidth=4*devicePixelRatio;
+    ctx.strokeStyle='#111827';
+    ctx.stroke();
+  }
+
+  // 점선은 전개도와 접히는 과정에서만 표시하고,
+  // 입체도형이 완성되면 접는선은 사라지게 함
+  if(progress < 0.98){
+    const edges=sharedEdges(centeredFlatFaces());
+    for(const e of edges){
+      const face=faces[e.face];
+      const [i,j]=edgeIndices(e.side);
+      drawDashedProjected(face.pts[i],face.pts[j]);
+    }
+  }
+}
+
+function animateTo(v){
+  cancelAnimationFrame(anim);
+  const start=progress, st=performance.now(), dur=3300;
+  function step(now){
+    const u=Math.min(1,(now-st)/dur);
+    progress=start+(v-start)*ease(u);
+    if(progress<0.001)progress=0;
+    if(progress>0.999)progress=1;
+    draw();
+    if(u<1) anim=requestAnimationFrame(step);
+  }
+  anim=requestAnimationFrame(step);
+}
+
+foldBtn.onclick=()=>{ if(Math.abs(rotX)<0.01 && Math.abs(rotY)<0.01){rotX=-0.55;rotY=0.55;} animateTo(1); };
+unfoldBtn.onclick=()=>{ animateTo(0); };
+
+cubeBtn.onclick=()=>{shape='cube';net=0;progress=0;scale=1;setActive();draw();drawThumbs()};
+cuboidBtn.onclick=()=>{shape='cuboid';net=0;progress=0;scale=1;setActive();draw();drawThumbs()};
+
+document.querySelectorAll('.netcard').forEach(card=>{
+  card.onclick=()=>{net=+card.dataset.net;progress=0;scale=1;setActive();draw();}
+});
+
+function setActive(){
+  cubeBtn.classList.toggle('active',shape==='cube');
+  cuboidBtn.classList.toggle('active',shape==='cuboid');
+  document.querySelectorAll('.netcard').forEach((c,i)=>c.classList.toggle('active',i===net));
+  netTitle.textContent='전개도 선택 ('+(shape==='cube'?'정육면체':'직육면체')+')';
+  toast.textContent=(shape==='cube'?'정육면체':'직육면체')+' 전개도 유형 '+(net+1)+'이에요. 가운데 면을 기준으로 모서리를 따라 천천히 접혀요.';
+}
+
+function drawThumbs(){
+  document.querySelectorAll('.thumb').forEach((tc,idx)=>{
+    tc.width=tc.clientWidth*devicePixelRatio;
+    tc.height=tc.clientHeight*devicePixelRatio;
+    const t=tc.getContext('2d'); t.clearRect(0,0,tc.width,tc.height);
+    const old=net; net=idx;
+    const cells=flatCells();
+    net=old;
+    const minX=Math.min(...cells.map(c=>c.x)), maxX=Math.max(...cells.map(c=>c.x+c.w));
+    const minY=Math.min(...cells.map(c=>c.y)), maxY=Math.max(...cells.map(c=>c.y+c.h));
+    const sc=Math.min((tc.width-12)/(maxX-minX),(tc.height-12)/(maxY-minY));
+    for(const c of cells){
+      const x=(c.x-minX)*sc+6, y=(c.y-minY)*sc+6, w=c.w*sc, h=c.h*sc;
+      t.fillStyle=colors[c.id]; t.fillRect(x,y,w,h);
+      t.strokeStyle='#111'; t.lineWidth=1.2*devicePixelRatio; t.strokeRect(x,y,w,h);
+    }
+  });
+}
+
+canvas.addEventListener('pointerdown',e=>{
+  canvas.setPointerCapture(e.pointerId);
+  pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  dragging=true; lastX=e.clientX; lastY=e.clientY;
+});
+canvas.addEventListener('pointermove',e=>{
+  if(!pointers.has(e.pointerId)) return;
+  pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  const arr=[...pointers.values()];
+  if(arr.length===1 && dragging){
+    rotY+=(e.clientX-lastX)*0.01;
+    rotX+=(e.clientY-lastY)*0.01;
+    lastX=e.clientX; lastY=e.clientY; draw();
+  }
+  if(arr.length>=2){
+    const d=Math.hypot(arr[0].x-arr[1].x,arr[0].y-arr[1].y);
+    if(lastPinch){scale=Math.min(2.3,Math.max(.45,scale*d/lastPinch));draw();}
+    lastPinch=d;
+  }
+});
+canvas.addEventListener('pointerup',e=>{pointers.delete(e.pointerId);lastPinch=null;dragging=false});
+canvas.addEventListener('pointercancel',e=>{pointers.delete(e.pointerId);lastPinch=null;dragging=false});
+canvas.addEventListener('wheel',e=>{
+  e.preventDefault();
+  scale=Math.min(2.3,Math.max(.45,scale*(e.deltaY>0?.9:1.1)));
+  draw();
+},{passive:false});
+
+resize(); setActive();
+</script>
+</body>
+</html>
